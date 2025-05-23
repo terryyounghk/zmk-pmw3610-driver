@@ -612,9 +612,13 @@ static int pmw3610_report_data(const struct device *dev) {
 
     data->curr_mode = input_mode;
 
+    int16_t x;
+    int16_t y;
+
 #if AUTOMOUSE_LAYER > 0
     if (input_mode == MOVE &&
-            (automouse_triggered || zmk_keymap_highest_layer_active() != AUTOMOUSE_LAYER)
+        (automouse_triggered || zmk_keymap_highest_layer_active() != AUTOMOUSE_LAYER) &&
+        (abs(x) + abs(y) > CONFIG_PMW3610_MOVEMENT_THRESHOLD)
     ) {
         activate_automouse_layer();
     }
@@ -630,8 +634,30 @@ static int pmw3610_report_data(const struct device *dev) {
     int16_t raw_y =
         TOINT16((buf[PMW3610_Y_L_POS] + ((buf[PMW3610_XY_H_POS] & 0x0F) << 8)), 12) / dividor;
 
-    int16_t x;
-    int16_t y;
+#ifdef CONFIG_PMW3610_ADJUSTABLE_MOUSESPEED
+    int16_t movement_size = abs(raw_x) + abs(raw_y);
+
+    float speed_multiplier = 1.0;
+    if (movement_size > 60) {
+        speed_multiplier = 3.0;
+    }else if (movement_size > 30) {
+        speed_multiplier = 1.5;
+    }else if (movement_size > 5) {
+        speed_multiplier = 1.0;
+    }else if (movement_size > 4) {
+        speed_multiplier = 0.9;
+    }else if (movement_size > 3) {
+        speed_multiplier = 0.7;
+    }else if (movement_size > 2) {
+        speed_multiplier = 0.5;
+    }else if (movement_size > 1) {
+        speed_multiplier = 0.1;
+    }
+
+    raw_x = raw_x * speed_multiplier;
+    raw_y = raw_y * speed_multiplier;
+
+#endif
 
     if (IS_ENABLED(CONFIG_PMW3610_ORIENTATION_0)) {
         x = -raw_x;
@@ -689,6 +715,15 @@ static int pmw3610_report_data(const struct device *dev) {
 
     if (x != 0 || y != 0) {
         if (input_mode != SCROLL) {
+#if AUTOMOUSE_LAYER > 0
+            // Caltulate the magnitude of trackball movement
+            int16_t movement_size = abs(x) + abs(y);
+            if (input_mode == MOVE &&
+                (automouse_triggered || zmk_keymap_highest_layer_active() != AUTOMOUSE_LAYER) &&
+                movement_size > CONFIG_PMW3610_MOVEMENT_THRESHOLD) {
+                activate_automouse_layer();
+            }
+#endif
             input_report_rel(dev, INPUT_REL_X, x, false, K_FOREVER);
             input_report_rel(dev, INPUT_REL_Y, y, true, K_FOREVER);
         } else {
